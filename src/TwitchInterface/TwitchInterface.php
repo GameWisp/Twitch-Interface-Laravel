@@ -1,4 +1,15 @@
 <?php
+
+namespace TwitchInterface;
+
+use Config;
+
+/**
+* GameWisp Twitch Interface
+* We re-wrote the hell out of this. Good god.
+*/
+
+
 /**
  * This Twitch Interface is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -16,135 +27,72 @@
  * Author: Anthony 'IBurn36360' Diaz - 2013
  */
 
-// Make sure we meet our dependency requirements
-if (!extension_loaded('curl')) trigger_error('cURL is not currently installed on your server, please install cURL');
-if (!extension_loaded('json')) trigger_error('PECL JSON or pear JSON is not installed, please install either PECL JSON or compile pear JSON');
-
-// Define some things in the global scope (yes...global, if you want to make it defined in the class scope, go for it)
-
-// Your API info goes here
-$twitch_clientKey = '';
-$twitch_clientSecret = '';
-$twitch_clientUrl = '';
-
-// Did our user forget any of their credentials?
-if (($twitch_clientKey === '' || null) || ($twitch_clientSecret === '' || null) || ($twitch_clientUrl === '' || null))
-{
-    trigger_error('Please enter your Kraken API credentials into the main file on lines 26, 27 and 28');
-}
-
-$twitch_debugLevels = array(
-    'FINE' => 1,   // Displays only call inits
-    'FINER' => 2,  // Displays variable changes
-    'FINEST' => 3, // Displays all output other than RAW returns
-    'ALL' => 4,    // Displays all output possible
-);
-
-// This holds many of the limitation settings for performing calls, stored as an array for ease of calling [Keyed]
-$twitch_configuration = array(
-    'CALL_LIMIT_SETTING'      => 'CALL_LIMIT_MAX', // This sets the query limit for all calls
-    'KEY_NAME'                => 'name',           // This controls how the key is determined, valid values are 'name' and 'display_name'
-    'DEFAULT_TIMEOUT'         => 5,                // This sets the timeout for the cURL interaction for the Kraken servers (connect timeout)
-    'DEFAULT_RETURN_TIMEOUT'  => 20,               // This sets the default return timeout for all returns (Post connection established)
-    'API_VERSION'             => 3,                // This sets what API version to use.  Specifies that value in the header
-    'TOKEN_SEND_METHOD'       => 'HEADER',         // This sets how any OAuth tokens are sent.  Valid options are 'HEADER' and 'QUERY'
-    'RETRY_COUNTER'           => 3,                // This sets the number of retries the interface will do when faced with status 0 returns
-    'CERT_PATH'               => '',               // Path to your certificate (if you are supplying one)
-    'DEBUG_SUPPRESSION_LEVEL' => $twitch_debugLevels['FINE'], // This sets the maximum debug level that gets to output, ALL sets to display all returns, including RAW JSON returns
-    'CALL_LIMIT_DEFAULT'      => '25',
-    'CALL_LIMIT_DOUBLE'       => '50',
-    'CALL_LIMIT_MAX'          => '100'
-);
-
-// This is a helper function that I have decided to make available outside of the class scope
-if (!function_exists('getURLParamValue'))
-{
-    /**
-     * Retrieves the value of a passed parameter in a URL string, positionally insensitive
-     * 
-     * @param $url - [string] URL string provided
-     * @param $param - [string] The string parameter name to look for
-     * @param $maxMatchLength - [int] The maximum match length for the value, defaults to 40
-     * @param $matchSymbols - [bool] Sets the search to look for symbols in the value
-     * 
-     * @return $value - [string] The string value of that parameter searched for
-     */ 
-    function getURLParamValue($url, $param, $maxMatchLength = 40, $matchSymbols = false)
-    {
-        if ($matchSymbols)
-        {
-            $match = '[\w._@#$%\^\*\(\)!+\\|-]';
-        } else {
-            $match = '[\w]';
-        }
-        
-        //init and dump the chars into the regex
-        $param_regex = '';
-        $chars = str_split($param);
-        
-        // Build a char match for the param, case insensitive
-        foreach ($chars as $char)
-        {
-            $param_regex .= '[' . strtoupper($char) . strtolower($char) . ']';
-        }
-        
-        $value_arr = array();
-        preg_match('(' . $param_regex . '=' . $match . '{1,' . $maxMatchLength . '})', $url, $value_arr);
-        
-        // Dump to a string
-        $value = $value_arr[0];
-        
-        // Strip out the identifier
-        $value = preg_replace('([a-z]{1,40}=)', '', $value);
-        
-        // Clean memory
-        unset($url, $param, $maxMatchLength, $matchSymbols, $match, $param_regex, $chars, $char, $value_arr);
-        
-        return $value;
-    }
-}
-
-// This is a helper function that I have decided to make available outside of the class scope
-if (!function_exists('getURLParams'))
-{
-    /**
-     * Grabs an array of all URL parameters and values
-     * 
-     * @param $url - [string] URL string provided
-     * @param $maxMatchLength - [int] The maximum match length for all matches, defaults to 40
-     * @param $matchSymbols - [bool] Sets the search to look for symbols in the value
-     * 
-     * @return $parameters - [array] A keyed array of all values returned, key is param
-     */
-     function getURLParams($url, $maxMatchLength = 40, $matchSymbols = false)
-     {
-        if ($matchSymbols)
-        {
-            $match = '[\w._@#$%\^\*\(\)!+\\|-]';
-        } else {
-            $match = '[\w]';
-        }
-        
-        $matches = array();
-        $parameters = array();
-        preg_match('(([\w]{1,' . $maxMatchLength . '}=' . $match . '{1,' . $maxMatchLength . '}[&]{0,1}){1,' . $maxMatchLength . '})', $url, $matches);
-
-        $split = split('&', $matches[0]);
-        
-        foreach ($split as $row)
-        {
-            $splitRow = split('=', $row);
-            $parameters[$splitRow[0]] = $splitRow[1];
-        }
-        
-        unset($url, $maxMatchLength, $matchSymbols, $match, $matches, $split, $row, $splitRow);
-        
-        return $parameters;
-     }
-}
-
-class twitch
+class TwitchInterface
 {           
+    protected $twitch_clientKey = '';
+    protected $twitch_clientSecret = '';
+    protected $twitch_clientUrl = '';
+
+    protected $twitch_configuration = array();
+    protected $twitch_debugLevels = array();
+
+    public function __construct($params = array())
+    {
+        $this->twitch_clientKey = Config::get("twitch-interface-laravel.twitch_client_key");
+        $this->twitch_clientSecret = Config::get("twitch-interface-laravel.twitch_client_secret");
+        $this->twitch_clientUrl = Config::get("twitch-interface-laravel.twitch_client_url");
+
+        // Generate some warnings/errors if needed variables are not set.
+        if ($this->twitch_clientKey == "")
+        {
+            $this->__log("ERROR", __FUNCTION__, "Warning: Client key is not defined.  This won't work.");
+        }
+        else
+        {
+            $this->__log("DEBUG", __FUNCTION__, "Client key: '$this->twitch_clientKey'");
+        }
+        if ($this->twitch_clientSecret == "")
+        {
+            $this->__log("ERROR", __FUNCTION__, "Warning: Client Secret key is not defined.  This won't work.");
+        }
+        else
+        {
+            // For security reasons, don't output the scoring key as part of the debug info.
+        }
+        if ($this->twitch_clientUrl == "")
+        {
+            $this->__log("ERROR", __FUNCTION__, "Warning: Twitch Client Url is not defined.  This won't work.");
+        }
+        else
+        {
+            $this->__log("DEBUG", __FUNCTION__, "Twitch Client Url host: '$this->twitch_clientUrl'");
+        }
+
+        // This holds many of the limitation settings for performing calls, stored as an array for ease of calling [Keyed]
+        $this->twitch_configuration = array(
+            'CALL_LIMIT_SETTING'      => 'CALL_LIMIT_MAX', // This sets the query limit for all calls
+            'KEY_NAME'                => 'name',           // This controls how the key is determined, valid values are 'name' and 'display_name'
+            'DEFAULT_TIMEOUT'         => 5,                // This sets the timeout for the cURL interaction for the Kraken servers (connect timeout)
+            'DEFAULT_RETURN_TIMEOUT'  => 20,               // This sets the default return timeout for all returns (Post connection established)
+            'API_VERSION'             => 3,                // This sets what API version to use.  Specifies that value in the header
+            'TOKEN_SEND_METHOD'       => 'HEADER',         // This sets how any OAuth tokens are sent.  Valid options are 'HEADER' and 'QUERY'
+            'RETRY_COUNTER'           => 3,                // This sets the number of retries the interface will do when faced with status 0 returns
+            'CERT_PATH'               => '',               // Path to your certificate (if you are supplying one)
+            'DEBUG_SUPPRESSION_LEVEL' => $twitch_debugLevels['FINE'], // This sets the maximum debug level that gets to output, ALL sets to display all returns, including RAW JSON returns
+            'CALL_LIMIT_DEFAULT'      => '25',
+            'CALL_LIMIT_DOUBLE'       => '50',
+            'CALL_LIMIT_MAX'          => '100'
+        );
+
+        $this->twitch_debugLevels = array(
+            'FINE' => 1,   // Displays only call inits
+            'FINER' => 2,  // Displays variable changes
+            'FINEST' => 3, // Displays all output other than RAW returns
+            'ALL' => 4,    // Displays all output possible
+        );
+
+    }
+
     /**
      * This allows users to bind into their error systems, here for compatability, defaults to echos for testing
      * 
@@ -2439,15 +2387,14 @@ class twitch
      * 
      * @return $chatToken - [string] complete login token for chat login
      */
-     
-     public function chat_generateToken($authKey, $code)
-     {
+    public function chat_generateToken($authKey, $code)
+    {
         $functionName = 'CHAT_GENERATE_TOKEN';
         $requiredAuth = 'chat_login';
         $prefix = 'oauth:';
-        
+
         $this->generateOutput($functionName, 'Generating chat login token', 1);
-        
+
         // We were supplied an OAuth token. check it for validity and scopes
         if (($authKey != null || '') || ($code != null || false))
         {
@@ -2502,18 +2449,18 @@ class twitch
             $this->generateOutput($functionName, 'Required scope found in array', 3);
             $authKey = $auth['token'];
         }
-        
+
         $this->generateOutput($functionName, 'Token generated, concating prefix', 3);
         $chatToken = $prefix . $authKey;
-        
+
         $this->generateOutput($functionName, 'Prefix added, login credential made: ' . $chatToken, 3);
-        
+
         // clean up
         $this->generateOutput($functionName, 'Cleaning memory', 3);
         unset($authKey, $auth, $authSuccessful, $code, $requiredAuth, $functionName, $type);        
-        
+
         return $chatToken;                
-     }
+    }
     
     /**
      * Gets a list of users that follow a given channel
@@ -4092,5 +4039,84 @@ class twitch
         
         return $userObject;
     }
+
+    /**
+     * Retrieves the value of a passed parameter in a URL string, positionally insensitive
+     * 
+     * @param $url - [string] URL string provided
+     * @param $param - [string] The string parameter name to look for
+     * @param $maxMatchLength - [int] The maximum match length for the value, defaults to 40
+     * @param $matchSymbols - [bool] Sets the search to look for symbols in the value
+     * 
+     * @return $value - [string] The string value of that parameter searched for
+     */ 
+    function getURLParamValue($url, $param, $maxMatchLength = 40, $matchSymbols = false)
+    {
+        if ($matchSymbols)
+        {
+            $match = '[\w._@#$%\^\*\(\)!+\\|-]';
+        } else {
+            $match = '[\w]';
+        }
+        
+        //init and dump the chars into the regex
+        $param_regex = '';
+        $chars = str_split($param);
+        
+        // Build a char match for the param, case insensitive
+        foreach ($chars as $char)
+        {
+            $param_regex .= '[' . strtoupper($char) . strtolower($char) . ']';
+        }
+        
+        $value_arr = array();
+        preg_match('(' . $param_regex . '=' . $match . '{1,' . $maxMatchLength . '})', $url, $value_arr);
+        
+        // Dump to a string
+        $value = $value_arr[0];
+        
+        // Strip out the identifier
+        $value = preg_replace('([a-z]{1,40}=)', '', $value);
+        
+        // Clean memory
+        unset($url, $param, $maxMatchLength, $matchSymbols, $match, $param_regex, $chars, $char, $value_arr);
+        
+        return $value;
+    }
+
+    /**
+     * Grabs an array of all URL parameters and values
+     * 
+     * @param $url - [string] URL string provided
+     * @param $maxMatchLength - [int] The maximum match length for all matches, defaults to 40
+     * @param $matchSymbols - [bool] Sets the search to look for symbols in the value
+     * 
+     * @return $parameters - [array] A keyed array of all values returned, key is param
+     */
+     function getURLParams($url, $maxMatchLength = 40, $matchSymbols = false)
+     {
+        if ($matchSymbols)
+        {
+            $match = '[\w._@#$%\^\*\(\)!+\\|-]';
+        } else {
+            $match = '[\w]';
+        }
+        
+        $matches = array();
+        $parameters = array();
+        preg_match('(([\w]{1,' . $maxMatchLength . '}=' . $match . '{1,' . $maxMatchLength . '}[&]{0,1}){1,' . $maxMatchLength . '})', $url, $matches);
+
+        $split = split('&', $matches[0]);
+        
+        foreach ($split as $row)
+        {
+            $splitRow = split('=', $row);
+            $parameters[$splitRow[0]] = $splitRow[1];
+        }
+        
+        unset($url, $maxMatchLength, $matchSymbols, $match, $matches, $split, $row, $splitRow);
+        
+        return $parameters;
+     }
 }
-?>
+
